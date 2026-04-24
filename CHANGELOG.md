@@ -10,6 +10,14 @@ until the sprint is closed, then move to a dated sprint block.
 
 > Add new entries here as you work. Move to a sprint block when the sprint ends.
 
+---
+
+## Sprint 2 — 2026-04-24 · Live ILP Model and ConstraintValidator
+
+**Goal:** Implement the complete Gurobi ILP formulation (constraints A–E plus Rigid
+Orientation) and the independent ConstraintValidator, replacing all solver stubs with
+production-ready code.
+
 ### Added
 
 **Backend**
@@ -66,6 +74,11 @@ until the sprint is closed, then move to a dated sprint block.
   covers happy path (mockPlan.json passes all checks), targeted failures for each of
   the four check types, touching-face boundary for non-overlap, and the rule that
   unpacked placements are skipped by all spatial checks.
+
+### Changed
+
+- `README.md`: Expand cross-platform setup instructions; updated with latest project
+  structure and development workflow details.
 
 ---
 

@@ -1,8 +1,9 @@
 """Hybrid ILP/FFD dispatcher (thesis section 3.5.2.3).
 
-OptimizationEngine.optimize() counts the manifest, routes to the correct
-solver based on SOLVER_THRESHOLD, then runs ConstraintValidator on the
-returned plan.
+OptimizationEngine.optimize() counts the manifest and routes to the correct
+solver based on SOLVER_THRESHOLD. The post-solve `ConstraintValidator` run
+is performed inside `AbstractSolver.solve()` itself (template method), so a
+solver cannot return an unchecked plan to this layer.
 """
 
 from __future__ import annotations
@@ -10,7 +11,6 @@ from __future__ import annotations
 from typing import List
 
 from api.models import FurnitureItem, PackingPlan, TruckSpec
-from core.validator import ConstraintValidator
 from settings import SOLVER_THRESHOLD
 from solver.ffd_solver import FFDSolver
 from solver.ilp_solver import ILPSolver
@@ -21,7 +21,6 @@ class OptimizationEngine:
 
     def __init__(self) -> None:
         self.threshold: int = SOLVER_THRESHOLD
-        self.validator: ConstraintValidator = ConstraintValidator()
         self._ilp: ILPSolver = ILPSolver()
         self._ffd: FFDSolver = FFDSolver()
 
@@ -34,6 +33,4 @@ class OptimizationEngine:
     ) -> PackingPlan:
         mode = self.get_active_algorithm(len(items))
         solver = self._ilp if mode == "ILP" else self._ffd
-        plan = solver.solve(items, truck)
-        self.validator.validate_all(plan, truck)
-        return plan
+        return solver.solve(items, truck)

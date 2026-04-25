@@ -10,6 +10,49 @@ until the sprint is closed, then move to a dated sprint block.
 
 > Add new entries here as you work. Move to a sprint block when the sprint ends.
 
+### Added
+
+**Backend**
+- `backend/solver/base.py`: Convert `AbstractSolver.solve()` into a template
+  method — runs the subclass `_solve()` then auto-invokes
+  `ConstraintValidator.validate_all()`; raises `PlanValidationError`
+  (carrying the failed plan, truck, and failing-check name) when any of the
+  four thesis 3.5.2.1 constraints (B, C, E, Rigid Orientation) is violated.
+  Solvers can no longer hand an unchecked `PackingPlan` to the API layer.
+- `backend/core/validator.py`: Add `PlanValidationError` exception and
+  `ConstraintValidator.first_failing_check()` helper that returns the name
+  of the first failing check (`non_overlap`, `boundary`, `orientation`,
+  `lifo`) or `None` when the plan is clean — used by the new safety net in
+  `AbstractSolver.solve()`.
+- `backend/solver/ffd_solver.py`: Implement live Route-Sequential FFD
+  heuristic — `_lifo_presort()` orders items by `(-stop_id, -volume)` so
+  the deepest-stop, largest items are placed first; `_greedy_placement()`
+  walks corner-derived candidate coordinates in `(y, x, z)` ascending
+  order and accepts the first that satisfies boundary, orientation,
+  non-overlap, and LIFO; orientation enumeration honours `side_up` via
+  `UPRIGHT_ORIENTATIONS`. Items that fail every candidate land in
+  `unplaced_items`. Worst case O(n²) per thesis Table 3.3.
+  Thesis ref: section 3.5.2.2
+- `backend/tests/test_ffd_solver.py`: Add 4 pytest cases for the live FFD
+  path — LIFO pre-sort ordering, end-to-end `_solve()` produces a plan
+  that passes `validate_all()`, oversized items land in `unplaced_items`,
+  and `side_up` items keep `h_i` along the truck z-axis (orientation in
+  `{0, 1}`).
+
+### Changed
+
+- `backend/solver/ilp_solver.py`, `backend/solver/ffd_solver.py`: Rename
+  the override `solve()` → `_solve()` to match the new template-method
+  contract in `AbstractSolver`. Public `solve()` is unchanged from the
+  caller's perspective.
+- `backend/core/optimizer.py`: Drop the redundant
+  `ConstraintValidator.validate_all()` call (and the validator field) —
+  validation is now enforced one layer down inside
+  `AbstractSolver.solve()`, so `OptimizationEngine.optimize()` simply
+  dispatches and returns.
+- `.gitignore`: Add `scratch_*.py` pattern to exclude local scratch/
+  experimental scripts from version control.
+
 ---
 
 ## Sprint 2 — 2026-04-24 · Live ILP Model and ConstraintValidator

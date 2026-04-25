@@ -37,7 +37,7 @@ class ILPSolver(AbstractSolver):
     Worst-case time complexity: O(2^n) (thesis section 3.5.2.4, path 2).
     """
 
-    def solve(self, items: List[FurnitureItem], truck: TruckSpec) -> PackingPlan:
+    def _solve(self, items: List[FurnitureItem], truck: TruckSpec) -> PackingPlan:
         if USE_MOCK_SOLVER:
             return self.load_mock()
 

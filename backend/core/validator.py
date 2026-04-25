@@ -15,6 +15,22 @@ from api.models import PackingPlan, TruckSpec
 UPRIGHT_ORIENTATIONS: frozenset[int] = frozenset({0, 1})
 
 
+class PlanValidationError(RuntimeError):
+    """Raised when a solver-produced PackingPlan fails validate_all().
+
+    Carries the failed plan and truck so callers can inspect or log them.
+    Used by AbstractSolver.solve() to enforce the post-solve safety net.
+    """
+
+    def __init__(self, plan: PackingPlan, truck: TruckSpec, failed_check: str) -> None:
+        super().__init__(
+            f"PackingPlan failed {failed_check} (solver_mode={plan.solver_mode})"
+        )
+        self.plan = plan
+        self.truck = truck
+        self.failed_check = failed_check
+
+
 class ConstraintValidator:
     """Checks a PackingPlan against the four domain constraints."""
 
@@ -112,3 +128,19 @@ class ConstraintValidator:
             and self.validate_orientation(plan)
             and self.validate_lifo(plan)
         )
+
+    def first_failing_check(self, plan: PackingPlan, truck: TruckSpec) -> str | None:
+        """Return the name of the first failing check, or None if all pass.
+
+        Used by AbstractSolver.solve() to attach a meaningful label to the
+        PlanValidationError raised when a solver returns an invalid plan.
+        """
+        if not self.validate_non_overlap(plan):
+            return "non_overlap"
+        if not self.validate_boundary(plan, truck):
+            return "boundary"
+        if not self.validate_orientation(plan):
+            return "orientation"
+        if not self.validate_lifo(plan):
+            return "lifo"
+        return None

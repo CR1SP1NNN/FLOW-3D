@@ -13,7 +13,13 @@ import time
 from typing import List, Tuple
 
 from api.models import FurnitureItem, PackingPlan, Placement, TruckSpec
-from settings import USE_MOCK_SOLVER
+from settings import (
+    GUROBI_MIP_GAP,
+    GUROBI_OUTPUT_FLAG,
+    GUROBI_THREADS,
+    GUROBI_TIME_LIMIT,
+    USE_MOCK_SOLVER,
+)
 from solver.base import AbstractSolver
 
 # Map orientation_index -> permutation of (w, l, h) assigned to truck axes
@@ -50,11 +56,13 @@ class ILPSolver(AbstractSolver):
         self._gp = gp
         self._GRB = GRB
 
+        self._apply_gurobi_params()
         self._variable_domains()
         self._orientation()
         self._boundary()
         self._non_overlap()
         self._lifo()
+        self._symmetry_breaking()
         self._objective()
 
         t0 = time.perf_counter()
@@ -62,6 +70,41 @@ class ILPSolver(AbstractSolver):
         t_exec_ms = int((time.perf_counter() - t0) * 1000)
 
         return self._extract_plan(t_exec_ms)
+
+    def _apply_gurobi_params(self) -> None:
+        """Push tuning knobs from settings.py onto the Gurobi model.
+
+        Each parameter is only set when the corresponding setting is non-None,
+        so leaving an env var blank preserves Gurobi's own default. Quiet
+        output by default keeps pytest logs readable; raise GUROBI_OUTPUT_FLAG
+        when debugging the model.
+        """
+        m = self._model
+        m.setParam("OutputFlag", GUROBI_OUTPUT_FLAG)
+        if GUROBI_TIME_LIMIT is not None:
+            m.setParam("TimeLimit", GUROBI_TIME_LIMIT)
+        if GUROBI_MIP_GAP is not None:
+            m.setParam("MIPGap", GUROBI_MIP_GAP)
+        if GUROBI_THREADS is not None:
+            m.setParam("Threads", GUROBI_THREADS)
+
+    def _min_effective_dims(self, item: FurnitureItem) -> Tuple[int, int, int]:
+        """Lower bounds on (w_eff, l_eff, h_eff) over admissible orientations.
+
+        Used to tighten the upper bounds on x_i, y_i, z_i: a packed item
+        cannot start at coordinate `> truck_dim - min_eff_dim`. This is a
+        valid Big-M-adjacent tightening because the boundary constraint
+        already forces `x_i + w_eff_i <= W`; pushing the bound onto the
+        variable itself helps Gurobi presolve and shrinks the LP relaxation.
+        """
+        admissible = (
+            UPRIGHT_ORIENTATIONS if item.side_up else tuple(range(6))
+        )
+        dims = (item.w, item.l, item.h)
+        w_choices = [dims[ORIENTATION_PERMUTATIONS[k][0]] for k in admissible]
+        l_choices = [dims[ORIENTATION_PERMUTATIONS[k][1]] for k in admissible]
+        h_choices = [dims[ORIENTATION_PERMUTATIONS[k][2]] for k in admissible]
+        return min(w_choices), min(l_choices), min(h_choices)
 
     def _variable_domains(self) -> None:
         """Domain definitions for b_i, s_ij_k, (x_i, y_i, z_i), and o_i,k.
@@ -86,9 +129,18 @@ class ILPSolver(AbstractSolver):
         W, L, H = self._truck.W, self._truck.L, self._truck.H
 
         self._b = m.addVars(n, vtype=GRB.BINARY, name="b")
-        self._x = m.addVars(n, vtype=GRB.INTEGER, lb=0, ub=W, name="x")
-        self._y = m.addVars(n, vtype=GRB.INTEGER, lb=0, ub=L, name="y")
-        self._z = m.addVars(n, vtype=GRB.INTEGER, lb=0, ub=H, name="z")
+        # Per-item upper bounds: a packed item cannot start past
+        # truck_dim - min_eff_dim. Items that cannot fit at all collapse to
+        # ub=0, so Gurobi presolve will fix them as unpackable when feasible.
+        x_ubs, y_ubs, z_ubs = [], [], []
+        for item in self._items:
+            w_min, l_min, h_min = self._min_effective_dims(item)
+            x_ubs.append(max(0, W - w_min))
+            y_ubs.append(max(0, L - l_min))
+            z_ubs.append(max(0, H - h_min))
+        self._x = m.addVars(n, vtype=GRB.INTEGER, lb=0, ub=x_ubs, name="x")
+        self._y = m.addVars(n, vtype=GRB.INTEGER, lb=0, ub=y_ubs, name="y")
+        self._z = m.addVars(n, vtype=GRB.INTEGER, lb=0, ub=z_ubs, name="z")
         self._s = m.addVars(
             [(i, j, k) for i in range(n) for j in range(i + 1, n) for k in range(1, 7)],
             vtype=GRB.BINARY,
@@ -263,6 +315,58 @@ class ILPSolver(AbstractSolver):
                         <= self._y[j] + L * (2 - self._b[i] - self._b[j]),
                         name=f"lifo_{i}_{j}",
                     )
+
+    def _symmetry_breaking(self) -> None:
+        """Valid inequalities + symmetry cuts to tighten the LP relaxation.
+
+        Two families, both proven not to cut off any optimal integer solution:
+
+        1. Separation activation linkage (LP-tightening valid inequality):
+              s_ij,k <= b_i      and      s_ij,k <= b_j
+           A separation indicator is only meaningful when both items are
+           packed. The base model already enforces
+           `sum_k s_ij,k >= b_i + b_j - 1`, but in the LP relaxation an s
+           variable could float to 1 even with b_i = b_j = 0. Capping each
+           s by both b's collapses that slack and typically improves the
+           root bound by a few percent on dense manifests.
+
+        2. Identical-item lex break (symmetry cut):
+              b_i >= b_j   for i < j and items i, j physically identical
+           Two items with the same (w, l, h, stop_id, side_up) are
+           interchangeable in any feasible solution; forcing the lower
+           index to be packed first removes a factorial branch of
+           equivalent solutions.
+
+        Skipped enhancements and why:
+          - Per-pair Big-M tightening below `M = W` (resp. L, H) is not
+            generally valid: the worst-case LHS at the boundary plus the
+            worst-case RHS at the origin already saturate the per-axis
+            truck dimension. We instead tightened variable upper bounds
+            in `_variable_domains()` (see `_min_effective_dims`).
+          - Anchor cuts (e.g. fixing the largest item at the origin) are
+            *not* added because the LIFO constraint couples placement to
+            stop_id, so the largest item's optimal y can be non-zero.
+        """
+        m = self._model
+        n = len(self._items)
+        s = self._s
+        b = self._b
+
+        # 1) s <= b on both items.
+        for i in range(n):
+            for j in range(i + 1, n):
+                for k in range(1, 7):
+                    m.addConstr(s[i, j, k] <= b[i], name=f"sleq_b_{i}_{j}_{k}_i")
+                    m.addConstr(s[i, j, k] <= b[j], name=f"sleq_b_{i}_{j}_{k}_j")
+
+        # 2) Identical-item lex break.
+        def signature(item: FurnitureItem) -> Tuple[int, int, int, int, bool]:
+            return (item.w, item.l, item.h, item.stop_id, item.side_up)
+
+        for i in range(n):
+            for j in range(i + 1, n):
+                if signature(self._items[i]) == signature(self._items[j]):
+                    m.addConstr(b[i] >= b[j], name=f"lexbreak_{i}_{j}")
 
     def _extract_plan(self, t_exec_ms: int) -> PackingPlan:
         """Convert the solved Gurobi model into a PackingPlan contract.

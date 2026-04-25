@@ -13,6 +13,70 @@ until the sprint is closed, then move to a dated sprint block.
 ### Added
 
 **Backend**
+- `backend/solver/ilp_solver.py`: Add `_apply_gurobi_params()` — pushes
+  `GUROBI_TIME_LIMIT`, `GUROBI_MIP_GAP`, `GUROBI_THREADS`, and
+  `GUROBI_OUTPUT_FLAG` onto the Gurobi model immediately after construction;
+  suppresses console output by default (`OutputFlag=0`) to keep pytest logs
+  readable; any parameter left `None` preserves the Gurobi internal default.
+- `backend/solver/ilp_solver.py`: Add `_min_effective_dims()` and tighten
+  variable upper bounds — `x[i].ub = W − w_min`, `y[i].ub = L − l_min`,
+  `z[i].ub = H − h_min` where each `*_min` is the minimum effective dimension
+  over the admissible orientation set for item `i` (`UPRIGHT_ORIENTATIONS`
+  for `side_up=True`, all 6 for free items); shrinks the LP relaxation domain
+  without removing any feasible integer solution.
+  Thesis ref: section 3.5.2.1 C — Boundary containment
+- `backend/solver/ilp_solver.py`: Add `_symmetry_breaking()` — two families
+  of valid inequalities added after `_non_overlap()`:
+  (1) Activation linkage: `s_ij,k ≤ b_i` and `s_ij,k ≤ b_j` for all pairs
+  and planes — collapses LP relaxation slack where a separation indicator
+  could float to 1 with both items unpacked;
+  (2) Identical-item lex break: `b_i ≥ b_j` for every `i < j` pair with
+  the same `(w, l, h, stop_id, side_up)` — prunes the factorial of
+  equivalent solutions from the Branch-and-Bound tree.
+  Code comments document why per-pair Big-M reduction below `W`/`L`/`H` was
+  rejected (boundary saturation already saturates the truck dimension) and
+  why an anchor cut was not added (LIFO can force the largest item off the
+  origin).
+  Thesis ref: section 3.5.2.1 B — Non-overlap Big-M
+- `backend/settings.py`: Expose four Gurobi tuning knobs —
+  `GUROBI_TIME_LIMIT` (`Optional[float]`, seconds), `GUROBI_MIP_GAP`
+  (`Optional[float]`), `GUROBI_THREADS` (`Optional[int]`),
+  `GUROBI_OUTPUT_FLAG` (`int`, default `0`); parsed by new
+  `_optional_float()` / `_optional_int()` helpers; `None` means "leave
+  Gurobi default".
+- `backend/tests/test_integration_solve.py`: Add 5 end-to-end integration
+  tests for `/api/solve` + `/api/result` with `USE_MOCK_SOLVER=False` —
+  fixtures `live_solver`, `force_ffd`, `force_ilp` control solver dispatch
+  without sending large manifests; tests cover FFD round-trip + client-side
+  validator re-check, LIFO Y-axis ordering (`y_i + l_i ≤ y_j` for
+  `stop_i > stop_j`), oversized `side_up` item landing in `unplaced_items`,
+  `side_up` rigid orientation index confined to `{0, 1}`, and ILP round-trip
+  (auto-skipped when Gurobi license is absent).
+  Thesis ref: section 3.5.2.1 B, C, E; section 3.5.2.2
+- `backend/tests/test_settings.py`: Add 3 pytest cases for env-var parsing —
+  `_optional_float` / `_optional_int` return `None` for blank env values,
+  parse non-blank floats and ints correctly, and `GUROBI_OUTPUT_FLAG`
+  defaults to `0` when unset.
+
+**Config & Docs**
+- `backend/tests/INTEGRATION_TESTS.md`: Add integration-test design document
+  covering scope table (layers exercised), fixture rationale, per-test
+  thesis-section mapping, Gurobi skip conditions, and run instructions.
+- `.env.example`: Document four new Gurobi env vars (`GUROBI_TIME_LIMIT`,
+  `GUROBI_MIP_GAP`, `GUROBI_THREADS`, `GUROBI_OUTPUT_FLAG`) with inline
+  usage notes.
+
+---
+
+## Sprint 3 — 2026-04-25 · FFD Heuristic, Post-Solve Safety Net, and Template Method
+
+**Goal:** Ship the live Route-Sequential FFD heuristic (thesis 3.5.2.2), convert
+`AbstractSolver.solve()` into a post-solve safety-net template method, and confirm the
+full pipeline (FFD → ConstraintValidator → PackingPlan) through the smoke test suite.
+
+### Added
+
+**Backend**
 - `backend/solver/base.py`: Convert `AbstractSolver.solve()` into a template
   method — runs the subclass `_solve()` then auto-invokes
   `ConstraintValidator.validate_all()`; raises `PlanValidationError`
@@ -22,22 +86,21 @@ until the sprint is closed, then move to a dated sprint block.
 - `backend/core/validator.py`: Add `PlanValidationError` exception and
   `ConstraintValidator.first_failing_check()` helper that returns the name
   of the first failing check (`non_overlap`, `boundary`, `orientation`,
-  `lifo`) or `None` when the plan is clean — used by the new safety net in
+  `lifo`) or `None` when the plan is clean — used by the safety net in
   `AbstractSolver.solve()`.
 - `backend/solver/ffd_solver.py`: Implement live Route-Sequential FFD
   heuristic — `_lifo_presort()` orders items by `(-stop_id, -volume)` so
   the deepest-stop, largest items are placed first; `_greedy_placement()`
-  walks corner-derived candidate coordinates in `(y, x, z)` ascending
-  order and accepts the first that satisfies boundary, orientation,
-  non-overlap, and LIFO; orientation enumeration honours `side_up` via
+  walks corner-derived candidate coordinates in `(y, x, z)` ascending order
+  and accepts the first that satisfies boundary, orientation, non-overlap,
+  and LIFO; orientation enumeration honours `side_up` via
   `UPRIGHT_ORIENTATIONS`. Items that fail every candidate land in
   `unplaced_items`. Worst case O(n²) per thesis Table 3.3.
   Thesis ref: section 3.5.2.2
 - `backend/tests/test_ffd_solver.py`: Add 4 pytest cases for the live FFD
-  path — LIFO pre-sort ordering, end-to-end `_solve()` produces a plan
-  that passes `validate_all()`, oversized items land in `unplaced_items`,
-  and `side_up` items keep `h_i` along the truck z-axis (orientation in
-  `{0, 1}`).
+  path — LIFO pre-sort ordering, end-to-end `_solve()` produces a plan that
+  passes `validate_all()`, oversized items land in `unplaced_items`, and
+  `side_up` items keep `h_i` along the truck z-axis (orientation in `{0, 1}`).
 
 ### Changed
 
@@ -46,12 +109,11 @@ until the sprint is closed, then move to a dated sprint block.
   contract in `AbstractSolver`. Public `solve()` is unchanged from the
   caller's perspective.
 - `backend/core/optimizer.py`: Drop the redundant
-  `ConstraintValidator.validate_all()` call (and the validator field) —
-  validation is now enforced one layer down inside
-  `AbstractSolver.solve()`, so `OptimizationEngine.optimize()` simply
-  dispatches and returns.
-- `.gitignore`: Add `scratch_*.py` pattern to exclude local scratch/
-  experimental scripts from version control.
+  `ConstraintValidator.validate_all()` call — validation is now enforced
+  one layer down inside `AbstractSolver.solve()`, so
+  `OptimizationEngine.optimize()` simply dispatches and returns.
+- `.gitignore`: Add `scratch_*.py` pattern to exclude local experimental
+  scripts from version control.
 
 ---
 

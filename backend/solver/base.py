@@ -40,7 +40,7 @@ class AbstractSolver(ABC):
         from thesis section 3.5.2.1 (B, C, E, and Rigid Orientation).
         """
         plan = self._solve(items, truck)
-        failed = self._validator.first_failing_check(plan, truck)
+        failed = self._validator.first_failing_check(plan, truck, items)
         if failed is not None:
             raise PlanValidationError(plan, truck, failed)
         return plan

@@ -10,6 +10,15 @@ until the sprint is closed, then move to a dated sprint block.
 
 > Add new entries here as you work. Move to a sprint block when the sprint ends.
 
+---
+
+## Sprint 4 — 2026-04-27 · Async Pipeline, Payload Constraint, and Live Demo Bring-up
+
+**Goal:** Wire the FastAPI ↔ Celery ↔ Redis ↔ PostgreSQL async pipeline end-to-end,
+add the missing payload-weight constraint to both solvers and the independent
+validator, and document the live bring-up procedure so the full stack can be
+demonstrated outside of mock mode.
+
 ### Added
 
 **Backend**
@@ -18,14 +27,47 @@ until the sprint is closed, then move to a dated sprint block.
   ConstraintValidator) asynchronously; enqueued via `apply_async()` and results stored
   in Redis; task config enables JSON serialization, 3600-second result retention, and
   started tracking for polling.
-- `backend/core/db.py`: Implement SQLAlchemy job logging to PostgreSQL — `job_logs` table
-  captures `job_id`, `solver_mode`, `n_items`, `v_util`, `t_exec_ms`, `status`,
+- `backend/core/db.py`: Implement SQLAlchemy job logging to PostgreSQL — `job_logs`
+  table captures `job_id`, `solver_mode`, `n_items`, `V_util`, `T_exec`, `status`,
   `error`, and `created_at` for every solve job (success or failure); used for ANOVA
-  benchmarking (thesis section 3.6); DB errors are swallowed gracefully so logging
-  never crashes the solve pipeline; `create_tables()` runs at app startup via lifespan.
-- `backend/tests/conftest.py`: Add pytest fixture `celery_eager` — configures Celery to
-  run tasks synchronously and store results in-memory; allows tests to run without a
-  broker/backend; fixture is auto-used on all tests.
+  benchmarking. DB errors are swallowed gracefully so logging never crashes the solve
+  pipeline; `create_tables()` runs at app startup via lifespan.
+  Thesis ref: section 3.6 — ANOVA benchmarking
+- `backend/solver/ilp_solver.py::_weight()`: Implement payload-capacity constraint
+  `Σ weight_kg_i · b_i ≤ payload_kg`; linear in `b_i` so it adds no integer
+  variables; skipped silently when `payload_kg ≤ 0` (treated as "no payload limit
+  configured"). Wired into `_solve()` between `_lifo()` and `_symmetry_breaking()`.
+  Thesis ref: section 3.5.2.1 — payload constraint
+- `backend/solver/ffd_solver.py::_greedy_placement()`: Add running `placed_weight`
+  counter that rejects items whose `weight_kg` would breach `truck.payload_kg`
+  before any geometry / corner-candidate iteration is attempted; failed items are
+  appended to `unplaced_items`.
+  Thesis ref: section 3.5.2.1 — payload constraint
+- `backend/core/validator.py::validate_weight()`: New post-solve check —
+  `Σ weight_kg_i · b_i ≤ payload_kg` over `is_packed=True` placements; manifest-
+  aware because `Placement` does not carry `weight_kg`. O(n).
+  Thesis ref: section 3.5.2.1 — payload constraint
+- `backend/tests/test_validator.py`: Add 4 pytest cases covering payload overload
+  rejection, under-payload acceptance, unpacked-ignored behaviour, and
+  `validate_all` / `first_failing_check` returning `"weight"` when the cap is
+  violated.
+- `backend/tests/conftest.py::pytest_collection_modifyitems`: Skip
+  `test_integration_solve.py` and `test_smoke.py` cleanly when localhost:6379 is
+  unreachable, with a clear "start Redis to run live tests" reason. Suite stays
+  green on dev machines without Docker; live tests execute as written when Redis
+  is up.
+
+**Frontend**
+- `frontend/.env.local.example`: New template — copy to `.env.local` to set
+  `VITE_USE_MOCK=false` and `VITE_API_URL=http://localhost:8000`. Vite picks
+  `.env.local` up automatically and it is git-ignored by default.
+
+**Config & Tooling**
+- `README.md`: Add "Celery worker" section with the Windows-specific
+  `--pool=solo` requirement (default prefork pool needs `fork()`); add
+  "End-to-end live demo" section listing the 5-step bring-up order
+  (Redis → Postgres → uvicorn → Celery worker → Vite) plus a `curl` health
+  check covering POST `/api/solve` and GET `/api/result/{job_id}`.
 
 ### Changed
 
@@ -33,15 +75,30 @@ until the sprint is closed, then move to a dated sprint block.
 - `backend/api/routes.py`: Convert POST/GET endpoints to async Celery queue pattern —
   `POST /api/solve` now returns HTTP 202 (Accepted) with `job_id` in <100 ms instead
   of blocking; `GET /api/result/{job_id}` polls Celery's AsyncResult backend, returning
-  `status: pending` while running, `status: done` with full plan on success, or HTTP 422
-  with `failed_check` detail when ConstraintValidator fails; adds `422` error response
-  for infeasible plans and unexpected task crashes.
-- `backend/main.py`: Add FastAPI lifespan context manager — calls `core.db.create_tables()`
-  at startup so PostgreSQL schema is initialized before first request.
-- `backend/requirements.txt`: Add `sqlalchemy` dependency (was missing but required by
-  `core/db.py`).
-- `backend/tests/test_integration_solve.py`: Fix imports (`_engine` now imported from
-  `worker.tasks` not `api.routes`); update POST status code assertion from `200` to `202`.
+  `status: pending` while running, `status: done` with full plan on success, or HTTP
+  422 with `failed_check` detail when ConstraintValidator fails; adds 422 error
+  response for infeasible plans and unexpected task crashes.
+- `backend/main.py`: Add FastAPI lifespan context manager — calls
+  `core.db.create_tables()` at startup so PostgreSQL schema is initialized before
+  the first request.
+- `backend/core/validator.py::validate_all()`, `first_failing_check()`: Add optional
+  `items: List[FurnitureItem]` parameter. Weight check is run last and only when
+  the manifest is supplied; placement-only callers (e.g. fixture-loading tests)
+  can omit `items` and the weight check is skipped.
+- `backend/solver/base.py::AbstractSolver.solve()`: Thread `items` through to
+  `first_failing_check` so the post-solve safety net always exercises the weight
+  check on real solver output.
+- `backend/requirements.txt`: Add `sqlalchemy` dependency (was missing but required
+  by `core/db.py`).
+- `backend/tests/test_integration_solve.py`: Fix imports (`_engine` now imported
+  from `worker.tasks`, not `api.routes`); update POST status code assertion
+  from `200` to `202`.
+
+**Frontend**
+- `frontend/src/api/client.ts::fetchSolution()`: Replace the infinite `while(true)`
+  poll loop with a 60-second deadline (`POLL_TIMEOUT_MS`); throws a diagnostic
+  error pointing at the Celery worker as the likely culprit when the deadline
+  passes. Previous behaviour spun the UI forever if the broker stalled.
 
 ---
 

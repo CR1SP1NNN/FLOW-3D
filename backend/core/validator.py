@@ -7,7 +7,9 @@ time complexity from Table 3.3 (thesis section 3.5.2.4).
 
 from __future__ import annotations
 
-from api.models import PackingPlan, TruckSpec
+from typing import List, Optional
+
+from api.models import FurnitureItem, PackingPlan, TruckSpec
 
 # Orientations {0, 1} keep the original vertical axis upright (h along z).
 # Restriction imposed on rigid items via the side_up flag per thesis
@@ -105,6 +107,22 @@ class ConstraintValidator:
                 return False
         return True
 
+    def validate_weight(
+        self, plan: PackingPlan, items: List[FurnitureItem], truck: TruckSpec
+    ) -> bool:
+        """Verify the truck payload constraint.
+
+            sum(weight_kg_i * b_i) <= payload_kg
+
+        Manifest-level constraint — Placement does not carry weight_kg, so
+        the original items list is required. Items absent from the manifest
+        contribute zero (defensive default; the solver should never emit a
+        placement for an unknown item_id). Complexity: O(n).
+        """
+        weights = {it.item_id: it.weight_kg for it in items}
+        total = sum(weights.get(p.item_id, 0.0) for p in plan.placements if p.is_packed)
+        return total <= truck.payload_kg
+
     def validate_lifo(self, plan: PackingPlan) -> bool:
         """Verify the Sequential Loading Constraint.
 
@@ -120,20 +138,38 @@ class ConstraintValidator:
                     return False
         return True
 
-    def validate_all(self, plan: PackingPlan, truck: TruckSpec) -> bool:
-        """Run every check and return True only if all pass."""
+    def validate_all(
+        self,
+        plan: PackingPlan,
+        truck: TruckSpec,
+        items: Optional[List[FurnitureItem]] = None,
+    ) -> bool:
+        """Run every check and return True only if all pass.
+
+        The weight check is skipped when `items` is None (placement-only
+        callers such as fixture-loading tests). Solvers always pass the
+        original manifest, so the safety net in AbstractSolver.solve()
+        always exercises it.
+        """
         return (
             self.validate_non_overlap(plan)
             and self.validate_boundary(plan, truck)
             and self.validate_orientation(plan)
             and self.validate_lifo(plan)
+            and (items is None or self.validate_weight(plan, items, truck))
         )
 
-    def first_failing_check(self, plan: PackingPlan, truck: TruckSpec) -> str | None:
+    def first_failing_check(
+        self,
+        plan: PackingPlan,
+        truck: TruckSpec,
+        items: Optional[List[FurnitureItem]] = None,
+    ) -> str | None:
         """Return the name of the first failing check, or None if all pass.
 
         Used by AbstractSolver.solve() to attach a meaningful label to the
         PlanValidationError raised when a solver returns an invalid plan.
+        Weight is checked last and only when the manifest is supplied.
         """
         if not self.validate_non_overlap(plan):
             return "non_overlap"
@@ -143,4 +179,6 @@ class ConstraintValidator:
             return "orientation"
         if not self.validate_lifo(plan):
             return "lifo"
+        if items is not None and not self.validate_weight(plan, items, truck):
+            return "weight"
         return None

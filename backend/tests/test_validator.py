@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from api.models import PackingPlan, Placement, TruckSpec
+from api.models import FurnitureItem, PackingPlan, Placement, TruckSpec
 from core.validator import ConstraintValidator
 from settings import MOCK_PLAN_PATH
 
@@ -145,6 +145,53 @@ def test_orientation_rejects_out_of_range(validator: ConstraintValidator) -> Non
     )
     plan = _plan([bad])
     assert validator.validate_orientation(plan) is False
+
+
+def test_weight_rejects_overload(validator: ConstraintValidator) -> None:
+    truck = TruckSpec(payload_kg=100.0)
+    items = [
+        FurnitureItem(item_id="a", w=100, l=100, h=100, weight_kg=80, stop_id=1),
+        FurnitureItem(item_id="b", w=100, l=100, h=100, weight_kg=50, stop_id=1),
+    ]
+    plan = _plan([
+        _placement(item_id="a", x=0, y=0, z=0),
+        _placement(item_id="b", x=200, y=0, z=0),
+    ])
+    assert validator.validate_weight(plan, items, truck) is False
+
+
+def test_weight_allows_under_payload(validator: ConstraintValidator) -> None:
+    truck = TruckSpec(payload_kg=100.0)
+    items = [
+        FurnitureItem(item_id="a", w=100, l=100, h=100, weight_kg=40, stop_id=1),
+        FurnitureItem(item_id="b", w=100, l=100, h=100, weight_kg=50, stop_id=1),
+    ]
+    plan = _plan([
+        _placement(item_id="a", x=0, y=0, z=0),
+        _placement(item_id="b", x=200, y=0, z=0),
+    ])
+    assert validator.validate_weight(plan, items, truck) is True
+
+
+def test_weight_ignores_unpacked(validator: ConstraintValidator) -> None:
+    truck = TruckSpec(payload_kg=100.0)
+    items = [
+        FurnitureItem(item_id="a", w=100, l=100, h=100, weight_kg=80, stop_id=1),
+        FurnitureItem(item_id="b", w=100, l=100, h=100, weight_kg=80, stop_id=1),
+    ]
+    plan = _plan([
+        _placement(item_id="a", x=0, y=0, z=0),
+        _placement(item_id="b", x=200, y=0, z=0, is_packed=False),
+    ])
+    assert validator.validate_weight(plan, items, truck) is True
+
+
+def test_validate_all_flags_weight(validator: ConstraintValidator) -> None:
+    truck = TruckSpec(payload_kg=10.0)
+    items = [FurnitureItem(item_id="heavy", w=100, l=100, h=100, weight_kg=999, stop_id=1)]
+    plan = _plan([_placement(item_id="heavy")])
+    assert validator.validate_all(plan, truck, items) is False
+    assert validator.first_failing_check(plan, truck, items) == "weight"
 
 
 def test_unpacked_items_ignored_by_spatial_checks(

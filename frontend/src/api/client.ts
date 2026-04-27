@@ -5,6 +5,7 @@ const USE_MOCK = import.meta.env.VITE_USE_MOCK !== "false";
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 const POLL_INTERVAL_MS = 500;
+const POLL_TIMEOUT_MS = 60_000;
 const MOCK_DELAY_MS = 800;
 
 function delay(ms: number): Promise<void> {
@@ -46,7 +47,8 @@ export async function fetchSolution(
   }
   const { job_id } = (await solveResponse.json()) as { job_id: string };
 
-  while (true) {
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
     await delay(POLL_INTERVAL_MS);
     const resultResponse = await fetch(`${API_URL}/api/result/${job_id}`);
     if (!resultResponse.ok) {
@@ -60,4 +62,8 @@ export async function fetchSolution(
       return body.plan;
     }
   }
+  throw new Error(
+    `Solver poll timed out after ${POLL_TIMEOUT_MS / 1000}s (job ${job_id}). ` +
+      "Check that the Celery worker is running.",
+  );
 }

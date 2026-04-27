@@ -98,6 +98,10 @@ class FFDSolver(AbstractSolver):
             3. Non-overlap                    (thesis 3.5.2.1 B)
             4. LIFO spatial boundary          (thesis 3.5.2.1 E)
 
+        A running payload counter also enforces
+        `sum(weight_kg) <= truck.payload_kg`; items that would breach the
+        cap are sent to unplaced_items without attempting any geometry.
+
         Items that fail every candidate are appended to unplaced_items.
 
         Thesis section 3.5.2.2, Phase 3.
@@ -105,8 +109,14 @@ class FFDSolver(AbstractSolver):
         placements: List[Placement] = []
         unplaced: List[str] = []
         candidates: List[Tuple[int, int, int]] = [(0, 0, 0)]
+        placed_weight: float = 0.0
+        weight_cap = truck.payload_kg if truck.payload_kg > 0 else float("inf")
 
         for item in sequence:
+            if placed_weight + item.weight_kg > weight_cap:
+                unplaced.append(item.item_id)
+                continue
+
             sorted_candidates = sorted(candidates, key=lambda c: (c[1], c[0], c[2]))
             chosen: Tuple[int, int, int, int, int, int, int] | None = None
 
@@ -150,6 +160,7 @@ class FFDSolver(AbstractSolver):
             candidates.extend(
                 [(cx + w_eff, cy, cz), (cx, cy + l_eff, cz), (cx, cy, cz + h_eff)]
             )
+            placed_weight += item.weight_kg
 
         return placements, unplaced
 

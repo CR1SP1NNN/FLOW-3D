@@ -62,6 +62,7 @@ class ILPSolver(AbstractSolver):
         self._boundary()
         self._non_overlap()
         self._lifo()
+        self._weight()
         self._symmetry_breaking()
         self._objective()
 
@@ -315,6 +316,26 @@ class ILPSolver(AbstractSolver):
                         <= self._y[j] + L * (2 - self._b[i] - self._b[j]),
                         name=f"lifo_{i}_{j}",
                     )
+
+    def _weight(self) -> None:
+        """Truck payload constraint.
+
+            sum(weight_kg_i * b_i) <= payload_kg
+
+        Manifest-level capacity bound on the chosen subset of items. Linear
+        in b_i so it adds no integer variables — Gurobi presolve usually
+        absorbs it into bound tightening on b. Skipped silently when
+        payload_kg <= 0 (interpreted as "no payload limit configured").
+        """
+        if self._truck.payload_kg <= 0:
+            return
+        m = self._model
+        gp = self._gp
+        m.addConstr(
+            gp.quicksum(it.weight_kg * self._b[i] for i, it in enumerate(self._items))
+            <= self._truck.payload_kg,
+            name="payload",
+        )
 
     def _symmetry_breaking(self) -> None:
         """Valid inequalities + symmetry cuts to tighten the LP relaxation.

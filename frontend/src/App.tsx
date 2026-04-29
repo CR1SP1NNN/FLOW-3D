@@ -173,22 +173,56 @@ function EmptyState() {
       </div>
       <div>
         <p className="text-sm font-medium text-gray-400">No packing plan loaded</p>
-        <p className="text-xs text-gray-600 mt-1 max-w-xs">
+        <p className="text-xs text-gray-600 mt-1 max-w-sm">
           Fill in the cargo manifest on the left and click{" "}
           <span className="text-gray-400">Solve Packing Plan</span> to generate
-          3 alternative LIFO-compliant loading plans.
+          three alternative LIFO-compliant loading plans, each optimized for a
+          different decision criterion.
         </p>
       </div>
-      <div className="flex flex-wrap justify-center gap-2">
-        {["ILP solver", "FFD heuristic", "LIFO constraints", "3D viz"].map((t) => (
-          <span
-            key={t}
-            className="text-xs text-gray-700 px-2 py-1 rounded bg-gray-900 border border-gray-800"
-          >
-            {t}
-          </span>
-        ))}
+      <div className="grid grid-cols-3 gap-2 max-w-md w-full">
+        <StrategyCard
+          name="Optimal"
+          tagline="Max utilization"
+          tone="violet"
+        />
+        <StrategyCard
+          name="Balanced"
+          tagline="Fast & predictable"
+          tone="teal"
+        />
+        <StrategyCard
+          name="Stability"
+          tagline="Low center of gravity"
+          tone="amber"
+        />
       </div>
+    </div>
+  );
+}
+
+type StrategyTone = "violet" | "teal" | "amber";
+
+const TONE_CLASSES: Record<StrategyTone, { name: string; tag: string }> = {
+  violet: { name: "text-violet-300", tag: "text-violet-400/60" },
+  teal:   { name: "text-teal-300",   tag: "text-teal-400/60" },
+  amber:  { name: "text-amber-300",  tag: "text-amber-400/60" },
+};
+
+function StrategyCard({
+  name,
+  tagline,
+  tone,
+}: {
+  name: string;
+  tagline: string;
+  tone: StrategyTone;
+}) {
+  const c = TONE_CLASSES[tone];
+  return (
+    <div className="text-center px-2 py-2 rounded bg-gray-900 border border-gray-800">
+      <div className={`text-xs font-bold ${c.name}`}>{name}</div>
+      <div className={`text-xs mt-0.5 ${c.tag}`}>{tagline}</div>
     </div>
   );
 }

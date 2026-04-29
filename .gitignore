@@ -22,6 +22,10 @@ node_modules/
 dist/
 .vite/
 
+# Playwright
+playwright-report/
+test-results/
+
 # OS — Windows
 Thumbs.db
 desktop.ini
@@ -33,6 +37,7 @@ desktop.ini
 
 # Claude Code — personal overrides only
 .claude/settings.local.json
+.claude/*.lock
 
 # Documents
 docs/*.pdf

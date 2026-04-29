@@ -12,7 +12,7 @@ until the sprint is closed, then move to a dated sprint block.
 
 ---
 
-## Sprint 7 — 2026-04-29 · True 3-Strategy DSS Plan Diversity and Playwright Smoke Harness
+## Sprint 8 — 2026-04-29 · True 3-Strategy DSS Plan Diversity and Playwright Smoke Harness
 
 **Goal:** Replace the three-identical-plan output with three structurally distinct
 packing plans — each driven by a different DSS objective (optimal utilization,
@@ -79,7 +79,7 @@ that verifies the UI end-to-end in mock mode.
 
 ---
 
-## Sprint 6 — 2026-04-28 · Unified Pre-Push Gate and Docker Compose Dev Pipeline
+## Sprint 7 — 2026-04-28 · Unified Pre-Push Gate and Docker Compose Dev Pipeline
 
 **Goal:** Consolidate the two-step pre-push gate into a single `/ship` slash
 command with a mode flag, and containerize the full live pipeline
@@ -129,57 +129,7 @@ workflow so members no longer juggle four terminals.
 
 ---
 
-## Sprint 5 — 2026-04-28 · Unified Pre-Push Gate and Docker Compose Dev Pipeline
-
-**Goal:** Consolidate the two-step pre-push gate into a single `/ship` slash
-command with a mode flag, and containerize the full live pipeline
-(Redis + FastAPI + Celery + Vite) into a one-command `docker compose up`
-workflow so members no longer juggle four terminals.
-
-### Added
-
-**Config & Tooling**
-- `.claude/commands/ship.md`: New unified slash command — `/ship` (commit
-  mode) runs gitignore audit, lint, tests, type check, secret/conflict/
-  large-file scans, and emits a ready-to-copy conventional commit message;
-  `/ship release` adds Sprint-aware `CHANGELOG.md` regeneration and a
-  semver tag proposal.
-- `docker-compose.yml`: New stack — `redis:7-alpine` with healthcheck,
-  FastAPI on `:8000`, Celery worker on `--pool=solo`, Vite dev server on
-  `:5173`; bind mounts on `./backend` and `./frontend` preserve hot
-  reload; `depends_on: service_healthy` ensures the broker is up before
-  the api and worker start.
-- `backend/Dockerfile`, `backend/.dockerignore`: Containerize FastAPI and
-  Celery on `python:3.11-slim` with `libpq-dev` for `psycopg2-binary`;
-  the same image is reused by both the `backend` and `celery` compose
-  services with a different `command`.
-- `frontend/Dockerfile`, `frontend/.dockerignore`: Containerize the Vite
-  dev server on `node:20-alpine`, bound to `0.0.0.0:5173` so the host
-  browser can reach it from `http://localhost:5173`.
-
-### Changed
-
-**Config & Docs**
-- `README.md`: Replace `/check-git-push` and `/update-changelog`
-  references with the unified `/ship` command (commit + release modes).
-- `.gitignore`: Add `gurobi.lic` so WLS / named-user license files are
-  never committed when mounted into containers via docker-compose.
-- `backend/api/routes.py`, `backend/main.py`, `backend/api/models.py`:
-  Drop unused imports surfaced by `ruff check`.
-- `.gitignore`: Add `.env.local` and `scratch_*.py` so the
-  `VITE_USE_MOCK=false` override and ad-hoc scratch scripts never reach
-  the remote.
-
-### Removed
-
-**Config & Tooling**
-- `.claude/commands/check-git-push.md`: Superseded by `/ship`
-  (commit mode).
-- `.claude/commands/update-changelog.md`: Superseded by `/ship release`.
-
----
-
-## Sprint 5 — 2026-04-28 · 3D Furniture Models, Animate Mode, and Manifest UX
+## Sprint 6 — 2026-04-28 · 3D Furniture Models, Animate Mode, and Manifest UX
 
 **Goal:** Render ShapeNetSem 3D furniture meshes in the loading viewer, add LIFO
 animate-mode playback, replace the free-text item input with a structured furniture
@@ -234,7 +184,7 @@ dropdown, and provide one-click JSON plan export.
 
 ---
 
-## Sprint 4 — 2026-04-27 · Async Pipeline, Payload Constraint, and Live Demo Bring-up
+## Sprint 5 — 2026-04-27 · Async Pipeline, Payload Constraint, and Live Demo Bring-up
 
 **Goal:** Wire the FastAPI ↔ Celery ↔ Redis ↔ PostgreSQL async pipeline end-to-end,
 add the missing payload-weight constraint to both solvers and the independent
@@ -329,7 +279,7 @@ demonstrated outside of mock mode.
 
 ---
 
-## Sprint 3 — 2026-04-25 · FFD Heuristic, Post-Solve Safety Net, and Template Method
+## Sprint 4 — 2026-04-25 · FFD Heuristic, Post-Solve Safety Net, and Template Method
 
 **Goal:** Ship the live Route-Sequential FFD heuristic (thesis 3.5.2.2), convert
 `AbstractSolver.solve()` into a post-solve safety-net template method, and confirm the
@@ -388,7 +338,7 @@ full pipeline (FFD → ConstraintValidator → PackingPlan) through the smoke te
 
 ---
 
-## Sprint 2 — 2026-04-24 · Live ILP Model and ConstraintValidator
+## Sprint 3 — 2026-04-24 · Live ILP Model and ConstraintValidator
 
 **Goal:** Implement the complete Gurobi ILP formulation (constraints A–E plus Rigid
 Orientation) and the independent ConstraintValidator, replacing all solver stubs with
